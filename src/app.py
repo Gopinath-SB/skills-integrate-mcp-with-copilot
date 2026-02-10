@@ -9,7 +9,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import os
+import json
 from pathlib import Path
+from pydantic import BaseModel
 
 app = FastAPI(title="Mergington High School API",
               description="API for viewing and signing up for extracurricular activities")
@@ -18,6 +20,18 @@ app = FastAPI(title="Mergington High School API",
 current_dir = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=os.path.join(Path(__file__).parent,
           "static")), name="static")
+
+# Request model for login
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+# Load teachers from JSON file
+def load_teachers():
+    teachers_file = Path(__file__).parent / "teachers.json"
+    with open(teachers_file, 'r') as f:
+        data = json.load(f)
+    return data["teachers"]
 
 # In-memory activity database
 activities = {
@@ -111,11 +125,15 @@ def signup_for_activity(activity_name: str, email: str):
 
 
 @app.delete("/activities/{activity_name}/unregister")
-def unregister_from_activity(activity_name: str, email: str):
-    """Unregister a student from an activity"""
+def unregister_from_activity(activity_name: str, email: str, token: str = None):
+    """Unregister a student from an activity (only teachers can do this)"""
     # Validate activity exists
     if activity_name not in activities:
         raise HTTPException(status_code=404, detail="Activity not found")
+
+    # Verify token for authorization
+    if not token or not verify_token(token):
+        raise HTTPException(status_code=401, detail="Unauthorized - teacher login required")
 
     # Get the specific activity
     activity = activities[activity_name]
@@ -130,3 +148,35 @@ def unregister_from_activity(activity_name: str, email: str):
     # Remove student
     activity["participants"].remove(email)
     return {"message": f"Unregistered {email} from {activity_name}"}
+
+
+@app.post("/login")
+def login(credentials: LoginRequest):
+    """Authenticate a teacher"""
+    teachers = load_teachers()
+    
+    # Check credentials
+    for teacher in teachers:
+        if teacher["username"] == credentials.username and teacher["password"] == credentials.password:
+            # Return a simple token (in production, use JWT)
+            token = f"{credentials.username}:{credentials.password}"
+            return {"token": token, "message": f"Logged in as {credentials.username}"}
+    
+    raise HTTPException(status_code=401, detail="Invalid username or password")
+
+
+def verify_token(token: str) -> bool:
+    """Verify if a token is valid"""
+    if not token:
+        return False
+    
+    try:
+        teachers = load_teachers()
+        username, password = token.split(":", 1)
+        
+        for teacher in teachers:
+            if teacher["username"] == username and teacher["password"] == password:
+                return True
+        return False
+    except:
+        return False

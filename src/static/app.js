@@ -3,6 +3,102 @@ document.addEventListener("DOMContentLoaded", () => {
   const activitySelect = document.getElementById("activity");
   const signupForm = document.getElementById("signup-form");
   const messageDiv = document.getElementById("message");
+  
+  // Modal elements
+  const modal = document.getElementById("login-modal");
+  const userIconBtn = document.getElementById("user-icon-btn");
+  const closeBtn = document.querySelector(".close");
+  const loginForm = document.getElementById("login-form");
+  const loginMessage = document.getElementById("login-message");
+
+  // Check if user is already logged in
+  let authToken = localStorage.getItem("authToken");
+  updateUserButtonState();
+
+  // Modal event listeners
+  userIconBtn.addEventListener("click", () => {
+    if (authToken) {
+      // If logged in, logout
+      logout();
+    } else {
+      // If not logged in, show modal
+      modal.classList.remove("hidden");
+    }
+  });
+
+  closeBtn.addEventListener("click", () => {
+    modal.classList.add("hidden");
+  });
+
+  window.addEventListener("click", (event) => {
+    if (event.target === modal) {
+      modal.classList.add("hidden");
+    }
+  });
+
+  // Login form submission
+  loginForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+
+    const username = document.getElementById("username").value;
+    const password = document.getElementById("password").value;
+
+    try {
+      const response = await fetch("/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ username, password }),
+      });
+
+      const result = await response.json();
+
+      if (response.ok) {
+        authToken = result.token;
+        localStorage.setItem("authToken", authToken);
+        loginMessage.textContent = result.message;
+        loginMessage.className = "success";
+        loginMessage.classList.remove("hidden");
+
+        // Reset form and close modal after 2 seconds
+        setTimeout(() => {
+          loginForm.reset();
+          modal.classList.add("hidden");
+          loginMessage.classList.add("hidden");
+          updateUserButtonState();
+          fetchActivities();
+        }, 2000);
+      } else {
+        loginMessage.textContent = result.detail || "Login failed";
+        loginMessage.className = "error";
+        loginMessage.classList.remove("hidden");
+      }
+    } catch (error) {
+      loginMessage.textContent = "Failed to login. Please try again.";
+      loginMessage.className = "error";
+      loginMessage.classList.remove("hidden");
+      console.error("Error logging in:", error);
+    }
+  });
+
+  function logout() {
+    localStorage.removeItem("authToken");
+    authToken = null;
+    updateUserButtonState();
+    fetchActivities();
+    userIconBtn.textContent = "👤 Login";
+  }
+
+  function updateUserButtonState() {
+    if (authToken) {
+      userIconBtn.textContent = "👤 Logout (Teacher)";
+      userIconBtn.style.backgroundColor = "#2e7d32";
+    } else {
+      userIconBtn.textContent = "👤 Login";
+      userIconBtn.style.backgroundColor = "#3949ab";
+    }
+  }
 
   // Function to fetch activities from API
   async function fetchActivities() {
@@ -21,7 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
         const spotsLeft =
           details.max_participants - details.participants.length;
 
-        // Create participants HTML with delete icons instead of bullet points
+        // Create participants HTML with delete icons only if teacher is logged in
         const participantsHTML =
           details.participants.length > 0
             ? `<div class="participants-section">
@@ -30,7 +126,11 @@ document.addEventListener("DOMContentLoaded", () => {
                 ${details.participants
                   .map(
                     (email) =>
-                      `<li><span class="participant-email">${email}</span><button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button></li>`
+                      `<li><span class="participant-email">${email}</span>${
+                        authToken
+                          ? `<button class="delete-btn" data-activity="${name}" data-email="${email}">❌</button>`
+                          : ""
+                      }</li>`
                   )
                   .join("")}
               </ul>
@@ -73,11 +173,20 @@ document.addEventListener("DOMContentLoaded", () => {
     const activity = button.getAttribute("data-activity");
     const email = button.getAttribute("data-email");
 
+    if (!authToken) {
+      messageDiv.textContent = "You must be logged in as a teacher to perform this action";
+      messageDiv.className = "error";
+      messageDiv.classList.remove("hidden");
+      return;
+    }
+
     try {
       const response = await fetch(
         `/activities/${encodeURIComponent(
           activity
-        )}/unregister?email=${encodeURIComponent(email)}`,
+        )}/unregister?email=${encodeURIComponent(email)}&token=${encodeURIComponent(
+          authToken
+        )}`,
         {
           method: "DELETE",
         }
